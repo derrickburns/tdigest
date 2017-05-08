@@ -105,6 +105,7 @@ class TDigest {
     if (others.size() > 0) {
       mergeProcessed(others);
       mergeUnprocessed(others);
+      dirty_ = true;
       processIfNecessary();
     }
   }
@@ -287,6 +288,8 @@ class TDigest {
 
   std::vector<Centroid> unprocessed_;
 
+  bool dirty_ = false;
+
   // return mean of i-th centroid
   inline Value mean(int i) const noexcept { return processed_[i].mean(); }
 
@@ -301,6 +304,7 @@ class TDigest {
     }
     unprocessed_.push_back(Centroid(x, w));
     unprocessedWeight_ += w;
+    dirty_ = true;
     processIfNecessary();
     return true;
   }
@@ -357,8 +361,9 @@ class TDigest {
   }
 
   // merges unprocessed_ centroids and processed_ centroids together and processes them
-  // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed
+  // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed_ centroids
   inline void process() {
+    if( !dirty_ ) return;
     CentroidComparator cc;
     std::sort(unprocessed_.begin(), unprocessed_.end(), cc);
     auto count = unprocessed_.size();
@@ -382,9 +387,10 @@ class TDigest {
         auto k1 = integratedLocation(wSoFar / processedWeight_);
         wLimit = processedWeight_ * integratedQ(k1 + 1.0);
         wSoFar += centroid.weight();
-        processed_.push_back(centroid);
+        processed_.emplace_back(centroid);
       }
     }
+    dirty_ = false;
     unprocessed_.clear();
     min = std::min(min, processed_[0].mean());
     max = std::max(max, (processed_.cend() - 1)->mean());
