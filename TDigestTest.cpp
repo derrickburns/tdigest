@@ -43,6 +43,20 @@ class TDigestTest : public ::testing::Test {
   // Objects declared here can be used by all tests in the test case for Foo.
 };
 
+TEST_F(TDigestTest, TDigestCompressTest) {
+  tdigest::TDigest tdigest1(1000);
+  for (int i = 0; i <= 10 * 500 * 1000; i++) {
+    tdigest1.add(std::rand() % 1001);
+  }
+  tdigest1.compress();
+
+  bool success;
+  EXPECT_NEAR(tdigest1.quantile(0.5, &success), 500.0, 2.0);
+  EXPECT_NEAR(tdigest1.quantile(0.95, &success), 950.0, 1.0);
+  EXPECT_NEAR(tdigest1.quantile(0.99, &success), 990.0, 0.5);
+  EXPECT_NEAR(tdigest1.quantile(0.995, &success), 995.0, 0.75);
+  EXPECT_NEAR(tdigest1.quantile(0.999, &success), 999.0, 0.60);
+}
 
 TEST_F(TDigestTest, TDigestMergeTest2) {
   tdigest::TDigest tdigest1(1000);
@@ -64,20 +78,7 @@ TEST_F(TDigestTest, TDigestMergeTest2) {
   EXPECT_NEAR(tdigest1.quantile(0.999, &success), 999.0, 0.60);
 }
 
-TEST_F(TDigestTest, TDigestCompressTest) {
-  tdigest::TDigest tdigest1(1000);
-  for (int i = 0; i <= 10 * 500 * 1000; i++) {
-    tdigest1.add(std::rand() % 1001);
-  }
-  tdigest1.compress();
 
-  bool success;
-  EXPECT_NEAR(tdigest1.quantile(0.5, &success), 500.0, 2.0);
-  EXPECT_NEAR(tdigest1.quantile(0.95, &success), 950.0, 1.0);
-  EXPECT_NEAR(tdigest1.quantile(0.99, &success), 990.0, 0.5);
-  EXPECT_NEAR(tdigest1.quantile(0.995, &success), 995.0, 0.75);
-  EXPECT_NEAR(tdigest1.quantile(0.999, &success), 999.0, 0.60);
-}
 
 }  // namespace stesting
 
