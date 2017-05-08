@@ -26,7 +26,6 @@ cc_library(
     deps = [
         "//external:glog",
         "//external:gtest",
-        "//infra/serializer:serializer"
     ],
     copts = [
         "-std=c++11",

@@ -18,6 +18,9 @@ using Index = size_t;
 
 class Centroid {
  public:
+
+  Centroid() : Centroid(0.0,0.0) {}
+  
   Centroid(Value mean, Weight weight) : mean_(mean), weight_(weight) {}
 
   inline Weight mean() const noexcept { return mean_; }
@@ -60,6 +63,8 @@ struct CentroidComparator {
 
 class TDigest {
  public:
+  TDigest() : TDigest(1000) {}
+
   explicit TDigest(Value compression) : TDigest(compression, 0) {}
 
   TDigest(Value compression, Index bufferSize) : TDigest(compression, bufferSize, 0) {}
@@ -69,7 +74,7 @@ class TDigest {
         maxProcessed_(processedSize(mergedSize, compression)),
         maxUnprocessed_(unprocessedSize(unmergedSize, compression)) {
     processed_.reserve(maxProcessed_);
-    unprocessed_.reserve(maxUnprocessed_ + 1);  
+    unprocessed_.reserve(maxUnprocessed_ + 1);
   }
 
   TDigest(std::vector<Centroid>&& processed, std::vector<Centroid>&& unprocessed, Value compression,
@@ -78,6 +83,19 @@ class TDigest {
     processed_ = std::move(processed);
     unprocessed_ = std::move(unprocessed);
   }
+
+  TDigest& operator=(TDigest&& o) {
+    compression_ = o.compression_;
+    maxProcessed_ = o.maxProcessed_;
+    maxUnprocessed_ = o.maxUnprocessed_;
+    processed_ = std::move(o.processed_);
+    unprocessed_ = std::move(o.unprocessed_);
+    return *this;
+  }
+
+  TDigest(TDigest&& o)
+      : TDigest(std::move(o.processed_), std::move(o.unprocessed_), o.compression_, o.maxUnprocessed_,
+                o.maxProcessed_) {}
 
   static inline Index processedSize(Index size, Value compression) noexcept {
     return (size == 0) ? static_cast<Index>(2 * std::ceil(compression)) : size;
@@ -88,20 +106,20 @@ class TDigest {
   }
 
   // merge in another t-digest
-  inline void merge(const TDigest& other) {
-    std::vector<TDigest> others{other};
+  inline void merge(const TDigest* other) {
+    std::vector<const TDigest*> others{other};
     add(others);
   }
 
-  const std::vector<Centroid>& processed() { return processed_; }
+  const std::vector<Centroid>& processed() const { return processed_; }
 
-  const std::vector<Centroid>& unprocessed() { return unprocessed_; }
+  const std::vector<Centroid>& unprocessed() const { return unprocessed_; }
 
-  Index maxUnprocessed() { return maxUnprocessed_; }
+  Index maxUnprocessed() const { return maxUnprocessed_; }
 
-  Index maxProcessed() { return maxProcessed_; }
+  Index maxProcessed() const { return maxProcessed_; }
 
-  void add(const std::vector<TDigest> others) {
+  void add(const std::vector<const TDigest *>& others) {
     if (others.size() > 0) {
       mergeProcessed(others);
       mergeUnprocessed(others);
@@ -113,20 +131,18 @@ class TDigest {
   long totalWeight() const { return static_cast<long>(processedWeight_ + unprocessedWeight_); }
 
   // return the cdf on the t-digest
-  Value cdf(Value x, bool* success) {
+  Value cdf(Value x) {
     process();
-    return cdfProcessed(x, success);
+    return cdfProcessed(x);
   }
 
   // true if there are unprocessed values in the t-digest
   bool haveUnprocessed() const noexcept { return unprocessed_.size() > 0; }
 
   // return the cdf on the processed values
-  Value cdfProcessed(Value x, bool* success) const {
-    *success = true;
+  Value cdfProcessed(Value x) const {
     if (processed_.size() == 0) {
       // no data to examine
-      *success = false;
       return 0.0;
     } else if (processed_.size() == 1) {
       // exactly one centroid, should have max==min
@@ -200,31 +216,30 @@ class TDigest {
         }
         weightSoFar += (weight(it) + weight(it + 1)) / 2.0;
       }
+      return NAN;
     }
   }
 
   // this returns a quantile on the t-digest
-  Value quantile(Value q, bool* success) {
+  Value quantile(Value q) {
     process();
-    return quantileProcessed(q, success);
+    return quantileProcessed(q);
   }
 
   // this returns a quantile on the currently processed values without changing the t-digest
   // the value will not represent the unprocessed values
-  Value quantileProcessed(Value q, bool* success) const {
+  Value quantileProcessed(Value q) const {
     if (q < 0 || q > 1) {
       LOG(ERROR) << "q should be in [0,1], got " << q;
-      *success = false;
-      return 0.0;
+      return NAN;
     }
 
     if (processed_.size() == 0) {
       // no sorted means no data, no way to get a quantile
-      *success = false;
-      return 0.0;
+      return NAN;
     } else if (processed_.size() == 1) {
       // with one data point, all quantiles lead to Rome
-      *success = true;
+
       return mean(0);
     }
 
@@ -237,7 +252,6 @@ class TDigest {
     // at the boundaries, we return min or max
     if (index < weight(0) / 2.0) {
       CHECK_GT(weight(0), 0);
-      *success = true;
       return min + 2.0 * index / weight(0) * (mean(0) - min);
     }
 
@@ -249,7 +263,6 @@ class TDigest {
         // sorted i and i+1 bracket our current point
         auto z1 = index - weightSoFar;
         auto z2 = weightSoFar + dw - index;
-        *success = true;
         return weightedAverage(mean(i), z2, mean(i + 1), z1);
       }
       weightSoFar += dw;
@@ -259,18 +272,30 @@ class TDigest {
 
     auto z1 = index - processedWeight_ - weight(n - 1) / 2.0;
     auto z2 = weight(n - 1) / 2 - z1;
-    *success = true;
     return weightedAverage(mean(n - 1), z1, max, z2);
   }
 
-  Value compression() { return compression_; }
+  Value compression() const { return compression_; }
 
   void add(Value x) { add(x, 1); }
 
-  inline void compress() { processIfNecessary(); }
+  inline void compress() { process(); }
+
+  // add a single centroid to the unprocessed vector, processing previously unprocessed sorted if our limit has
+  // been reached.
+  inline bool add(Value x, Weight w) {
+    if (std::isnan(x)) {
+      return false;
+    }
+    unprocessed_.push_back(Centroid(x, w));
+    unprocessedWeight_ += w;
+    dirty_ = true;
+    processIfNecessary();
+    return true;
+  }
 
  private:
-  const Value compression_;
+  Value compression_;
 
   Value min = std::numeric_limits<Value>::max();
 
@@ -296,48 +321,35 @@ class TDigest {
   // return weight of i-th centroid
   inline Weight weight(int i) const noexcept { return processed_[i].weight(); }
 
-  // add a single centroid to the unprocessed vector, processing previously unprocessed sorted if our limit has
-  // been reached.
-  inline bool add(Value x, Weight w) {
-    if (std::isnan(x)) {
-      return false;
-    }
-    unprocessed_.push_back(Centroid(x, w));
-    unprocessedWeight_ += w;
-    dirty_ = true;
-    processIfNecessary();
-    return true;
-  }
-
   // append all unprocessed centroids into current unprocessed vector
-  void mergeUnprocessed(const std::vector<TDigest>& tdigests) {
+  void mergeUnprocessed(const std::vector<const TDigest *>& tdigests) {
     if (tdigests.size() == 0) return;
 
     size_t total = unprocessed_.size();
     for (auto& td : tdigests) {
-      total += td.unprocessed_.size();
+      total += td->unprocessed_.size();
     }
 
     unprocessed_.reserve(total);
     for (auto& td : tdigests) {
-      unprocessed_.insert(unprocessed_.end(), td.unprocessed_.cbegin(), td.unprocessed_.cend());
-      unprocessedWeight_ += td.unprocessedWeight_;
+      unprocessed_.insert(unprocessed_.end(), td->unprocessed_.cbegin(), td->unprocessed_.cend());
+      unprocessedWeight_ += td->unprocessedWeight_;
     }
   }
 
   // merge all processed centroids together into a single sorted vector
-  void mergeProcessed(const std::vector<TDigest>& tdigests) {
+  void mergeProcessed(const std::vector<const TDigest *>& tdigests) {
     if (tdigests.size() == 0) return;
 
     size_t total = processed_.size();
     CentroidListQueue pq(CentroidListComparator{});
     for (auto& td : tdigests) {
-      auto& sorted = td.processed_;
+      auto& sorted = td->processed_;
       auto size = sorted.size();
       if (size > 0) {
         pq.push(CentroidList(sorted));
         total += size;
-        processedWeight_ += td.processedWeight_;
+        processedWeight_ += td->processedWeight_;
       }
     }
     pq.push(CentroidList(processed_));
@@ -363,7 +375,7 @@ class TDigest {
   // merges unprocessed_ centroids and processed_ centroids together and processes them
   // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed_ centroids
   inline void process() {
-    if( !dirty_ ) return;
+    if (!dirty_) return;
     CentroidComparator cc;
     std::sort(unprocessed_.begin(), unprocessed_.end(), cc);
     auto count = unprocessed_.size();
@@ -378,7 +390,9 @@ class TDigest {
     Weight wSoFar = unprocessed_[0].weight();
     Weight wLimit = processedWeight_ * integratedQ(1.0);
 
-    for (auto& centroid : unprocessed_) {
+    auto end = unprocessed_.end();
+    for (auto iter = unprocessed_.cbegin() + 1; iter < end; iter++) {
+      auto& centroid = *iter;
       Weight projectedW = wSoFar + centroid.weight();
       if (projectedW <= wLimit) {
         wSoFar = projectedW;

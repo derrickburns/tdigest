@@ -1,5 +1,5 @@
-#include "gtest/gtest.h"
 #include "glog/logging.h"
+#include "gtest/gtest.h"
 #include "tdigest2/TDigest.h"
 
 namespace stesting {
@@ -43,42 +43,176 @@ class TDigestTest : public ::testing::Test {
   // Objects declared here can be used by all tests in the test case for Foo.
 };
 
-TEST_F(TDigestTest, TDigestCompressTest) {
-  tdigest::TDigest tdigest1(1000);
-  for (int i = 0; i <= 10 * 500 * 1000; i++) {
-    tdigest1.add(std::rand() % 1001);
+static double cdf(const double x, const std::vector<double>& data) {
+  int n1 = 0;
+  int n2 = 0;
+  for (auto v : data) {
+    n1 += (v < x) ? 1 : 0;
+    n2 += (v <= x) ? 1 : 0;
   }
-  tdigest1.compress();
-
-  bool success;
-  EXPECT_NEAR(tdigest1.quantile(0.5, &success), 500.0, 2.0);
-  EXPECT_NEAR(tdigest1.quantile(0.95, &success), 950.0, 1.0);
-  EXPECT_NEAR(tdigest1.quantile(0.99, &success), 990.0, 0.5);
-  EXPECT_NEAR(tdigest1.quantile(0.995, &success), 995.0, 0.75);
-  EXPECT_NEAR(tdigest1.quantile(0.999, &success), 999.0, 0.60);
+  return (n1 + n2) / 2.0 / data.size();
 }
 
-TEST_F(TDigestTest, TDigestMergeTest2) {
-  tdigest::TDigest tdigest1(1000);
-  tdigest::TDigest tdigest2(1000);
-  for (int i = 0; i <= 10 * 500 * 1000; i++) {
-    tdigest1.add(std::rand() % 1001);
+static double quantile(const double q, const std::vector<double>& values) {
+  double q1;
+  if (values.size() == 0) {
+    q1 = NAN;
+  } else if (q == 1 || values.size() == 1) {
+    q1 = values[values.size() - 1];
+  } else {
+    auto index = q * values.size();
+    if (index < 0.5) {
+      q1 = values[0];
+    } else if (values.size() - index < 0.5) {
+      q1 = values[values.size() - 1];
+    } else {
+      index -= 0.5;
+      const int intIndex = static_cast<int>(index);
+      q1 = values[intIndex + 1] * (index - intIndex) + values[intIndex] * (intIndex + 1 - index);
+    }
   }
-  for (int i = 0; i <= 10 * 500 * 1000; i++) {
-    tdigest2.add(std::rand() % 1001);
-  }
-  bool success;
-
-  tdigest1.merge(tdigest2);
-
-  EXPECT_NEAR(tdigest1.quantile(0.5, &success), 500.0, 2.0);
-  EXPECT_NEAR(tdigest1.quantile(0.95, &success), 950.0, 1.0);
-  EXPECT_NEAR(tdigest1.quantile(0.99, &success), 990.0, 0.5);
-  EXPECT_NEAR(tdigest1.quantile(0.995, &success), 995.0, 0.75);
-  EXPECT_NEAR(tdigest1.quantile(0.999, &success), 999.0, 0.60);
+  return q1;
 }
 
+TEST_F(TDigestTest, EmptyDigest) {
+  tdigest::TDigest digest(100);
+  EXPECT_EQ(0, digest.processed().size());
+}
 
+TEST_F(TDigestTest, SingleValue) {
+  tdigest::TDigest digest(100);
+  std::random_device gen;
+  std::uniform_real_distribution<> dist(0, 1000);
+  const auto value = dist(gen);
+  digest.add(value);
+  std::uniform_real_distribution<> dist2(0, 1.0);
+  const double q = dist2(gen);
+  EXPECT_NEAR(value, digest.quantile(0.0), 0.001f);
+  EXPECT_NEAR(value, digest.quantile(q), 0.001f);
+  EXPECT_NEAR(value, digest.quantile(1.0), 0.001f);
+}
+
+TEST_F(TDigestTest, FewValues) {
+  // When there are few values in the tree, quantiles should be exact
+  tdigest::TDigest digest(1000);
+
+  std::random_device gen;
+  std::uniform_real_distribution<> reals(0.0, 100.0);
+  std::uniform_int_distribution<> dist(0, 10);
+  std::uniform_int_distribution<> bools(0, 1);
+  std::uniform_real_distribution<> qvalue(0.0, 1.0);
+
+  const auto length = dist(gen);
+
+  std::vector<double> values;
+  values.reserve(length);
+  for (int i = 0; i < length; ++i) {
+    auto const value = (i == 0 || bools(gen)) ? reals(gen) : values[i - 1];
+    digest.add(value);
+    values.push_back(value);
+  }
+  std::sort(values.begin(), values.end());
+  digest.compress();
+
+  EXPECT_EQ(digest.processed().size(), values.size());
+
+  std::vector<double> testValues{0.0, 1.0e-10, qvalue(gen), 0.5, 1.0 - 1e-10, 1.0};
+  for (auto q : testValues) {
+    double q1 = quantile(q, values);
+    auto q2 = digest.quantile(q);
+    if (std::isnan(q1)) {
+      EXPECT_TRUE(std::isnan(q2));
+    } else {
+      EXPECT_NEAR(q1, q2, 0.03) << "q = " << q;
+    }
+  }
+}
+
+TEST_F(TDigestTest, MoreThan2BValues) {
+  tdigest::TDigest digest(1000);
+
+  std::random_device gen;
+  std::uniform_real_distribution<> reals(0.0, 1.0);
+  for (int i = 0; i < 1000; ++i) {
+    const double next = reals(gen);
+    digest.add(next);
+  }
+  for (int i = 0; i < 10; ++i) {
+    const double next = reals(gen);
+    const auto count = 1L << 28;
+    digest.add(next, count);
+  }
+  EXPECT_EQ(1000 + 10L * (1 << 28), digest.totalWeight());
+  EXPECT_GT(digest.totalWeight(), std::numeric_limits<int32_t>::max());
+  std::vector<double> quantiles{0, 0.1, 0.5, 0.9, 1, reals(gen)};
+  std::sort(quantiles.begin(), quantiles.end());
+  auto prev = std::numeric_limits<double>::min();
+  for (double q : quantiles) {
+    const double v = digest.quantile(q);
+    EXPECT_GE(v, prev) << "q = " << q;
+    prev = v;
+  }
+}
+
+TEST_F(TDigestTest, TestSorted) {
+  tdigest::TDigest digest(1000);
+  std::uniform_real_distribution<> reals(0.0, 1.0);
+  std::uniform_int_distribution<> ints(0, 10);
+
+  std::random_device gen;
+  for (int i = 0; i < 10000; ++i) {
+    digest.add(reals(gen), 1 + ints(gen));
+  }
+  digest.compress();
+  tdigest::Centroid previous(0, 0);
+  for (auto centroid : digest.processed()) {
+    if (previous.weight() != 0) {
+      CHECK_LE(previous.mean(), centroid.mean());
+    }
+    previous = centroid;
+  }
+}
+
+TEST_F(TDigestTest, ExtremeQuantiles) {
+  tdigest::TDigest digest(1000);
+  // t-digest shouldn't merge extreme nodes, but let's still test how it would
+  // answer to extreme quantiles in that case ('extreme' in the sense that the
+  // quantile is either before the first node or after the last one)
+
+  digest.add(10, 3);
+  digest.add(20, 1);
+  digest.add(40, 5);
+  // this group tree is roughly equivalent to the following sorted array:
+  // [ ?, 10, ?, 20, ?, ?, 50, ?, ? ]
+  // and we expect it to compute approximate missing values:
+  // [ 5, 10, 15, 20, 30, 40, 50, 60, 70]
+  std::vector<double> values{5.0, 10.0, 15.0, 20.0, 30.0, 35.0, 40.0, 45.0, 50.0};
+  std::vector<double> quantiles{1.5 / 9.0, 3.5 / 9.0, 6.5 / 9.0};
+  for (auto q : quantiles) {
+    EXPECT_NEAR(quantile(q, values), digest.quantile(q), 0.01) << "q = " << q;
+  }
+}
+
+TEST_F(TDigestTest, Montonicity) {
+  tdigest::TDigest digest(1000);
+  std::uniform_real_distribution<> reals(0.0, 1.0);
+  std::random_device gen;
+  for (int i = 0; i < 100000; i++) {
+    digest.add(reals(gen));
+  }
+
+  double lastQuantile = -1;
+  double lastX = -1;
+  for (double z = 0; z <= 1; z += 1e-5) {
+    double x = digest.quantile(z);
+    EXPECT_GE(x, lastX);
+    lastX = x;
+
+    double q = digest.cdf(z);
+    EXPECT_GE(q, lastQuantile);
+    lastQuantile = q;
+  }
+}
 
 }  // namespace stesting
 
