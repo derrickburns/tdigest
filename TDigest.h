@@ -377,6 +377,7 @@ class TDigest {
   void mergeProcessed(const std::vector<const TDigest*>& tdigests) {
     if (tdigests.size() == 0) return;
 
+    size_t total = 0;
     CentroidListQueue pq(CentroidListComparator{});
     for (auto& td : tdigests) {
       auto& sorted = td->processed_;
