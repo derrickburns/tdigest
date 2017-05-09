@@ -109,14 +109,30 @@ class TDigest {
       : TDigest(compression, unmergedSize, mergedSize) {
     processed_ = std::move(processed);
     unprocessed_ = std::move(unprocessed);
+ 
+    processedWeight_ = weight(processed_); 
+    unprocessedWeight_ = weight(unprocessed_);
+    updateCumulative();
+  }
+
+
+  static Weight weight(std::vector<Centroid>& centroids) noexcept {
+    Weight w = 0.0;
+    for( auto centroid: centroids ) {
+      w += centroid.weight();
+    }
+    return w;
   }
 
   TDigest& operator=(TDigest&& o) {
     compression_ = o.compression_;
     maxProcessed_ = o.maxProcessed_;
     maxUnprocessed_ = o.maxUnprocessed_;
+    processedWeight_ = o.processedWeight_;
+    unprocessedWeight_ = o.unprocessedWeight_;
     processed_ = std::move(o.processed_);
     unprocessed_ = std::move(o.unprocessed_);
+    cumulative_ = std::move(o.cumulative_);
     return *this;
   }
 
@@ -175,18 +191,25 @@ class TDigest {
     }
   }
 
+  Weight processedWeight() const { return processedWeight_; }
+
+  Weight unprocessedWeight() const { return unprocessedWeight_; }
+
+  bool haveUnprocessed() const { return unprocessed_.size() > 0; }
+
   size_t totalSize() const { return processed_.size() + unprocessed_.size(); }
 
   long totalWeight() const { return static_cast<long>(processedWeight_ + unprocessedWeight_); }
 
   // return the cdf on the t-digest
   Value cdf(Value x) {
-    process();
+    if(haveUnprocessed() || isDirty()) process();
     return cdfProcessed(x);
   }
 
-  // true if there are unprocessed values in the t-digest
-  bool haveUnprocessed() const noexcept { return unprocessed_.size() > 0; }
+  bool isDirty() {
+    return processed_.size() > maxProcessed_ || unprocessed_.size() > maxUnprocessed_;
+  }
 
   // return the cdf on the processed values
   Value cdfProcessed(Value x) const {
@@ -243,21 +266,18 @@ class TDigest {
         ++iter;
       }
 
-      if (iter + 1 != processed_.cend()) {
-        auto i = std::distance(processed_.cbegin(), iter);
-        auto z1 = x - (iter - 1)->mean();
-        auto z2 = (iter)->mean() - x;
-        CHECK_LE(0.0, z1);
-        CHECK_LE(z1, 1.0);
-        return weightedAverage(cumulative_[i - 1], z2, cumulative_[i], z1) / processedWeight_;
-      }
-      return NAN;
+      auto i = std::distance(processed_.cbegin(), iter);
+      auto z1 = x - (iter - 1)->mean();
+      auto z2 = (iter)->mean() - x;
+      CHECK_LE(0.0, z1);
+      CHECK_LE(z1, 1.0);
+      return weightedAverage(cumulative_[i - 1], z2, cumulative_[i], z1) / processedWeight_;
     }
   }
 
   // this returns a quantile on the t-digest
   Value quantile(Value q) {
-    process();
+    if(haveUnprocessed() || isDirty()) process();
     return quantileProcessed(q);
   }
 
@@ -322,7 +342,6 @@ class TDigest {
     }
     unprocessed_.push_back(Centroid(x, w));
     unprocessedWeight_ += w;
-    dirty_ = true;
     processIfNecessary();
     return true;
   }
@@ -348,8 +367,6 @@ class TDigest {
 
   std::vector<Weight> cumulative_;
 
-  bool dirty_ = false;
-
   // return mean of i-th centroid
   inline Value mean(int i) const noexcept { return processed_[i].mean(); }
 
@@ -370,7 +387,6 @@ class TDigest {
       unprocessed_.insert(unprocessed_.end(), td->unprocessed_.cbegin(), td->unprocessed_.cend());
       unprocessedWeight_ += td->unprocessedWeight_;
     }
-    dirty_ = true;
   }
 
   // merge all processed centroids together into a single sorted vector
@@ -405,12 +421,11 @@ class TDigest {
       sorted.push_back(*(best.iter));
       if (best.advance()) pq.push(best);
     }
-    dirty_ = true;
     processed_ = std::move(sorted);
   }
 
   inline void processIfNecessary() {
-    if (unprocessed_.size() > maxUnprocessed_ || processed_.size() > maxProcessed_) {
+    if (isDirty()) {
       process();
     }
   }
@@ -432,7 +447,6 @@ class TDigest {
   // merges unprocessed_ centroids and processed_ centroids together and processes them
   // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed_ centroids
   inline void process() {
-    if (!dirty_) return;
     CentroidComparator cc;
     std::sort(unprocessed_.begin(), unprocessed_.end(), cc);
     auto count = unprocessed_.size();
@@ -461,7 +475,6 @@ class TDigest {
         processed_.emplace_back(centroid);
       }
     }
-    dirty_ = false;
     unprocessed_.clear();
     min = std::min(min, processed_[0].mean());
     max = std::max(max, (processed_.cend() - 1)->mean());

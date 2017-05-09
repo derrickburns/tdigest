@@ -172,6 +172,14 @@ TEST_F(TDigestTest, MoreThan2BValues) {
   }
 }
 
+TEST_F(TDigestTest, MergeTest) {
+
+  tdigest::TDigest digest1(1000);
+  tdigest::TDigest digest2(1000);
+
+  digest2.add(std::vector<const tdigest::TDigest *> {&digest1});
+}
+
 TEST_F(TDigestTest, TestSorted) {
   tdigest::TDigest digest(1000);
   std::uniform_real_distribution<> reals(0.0, 1.0);
