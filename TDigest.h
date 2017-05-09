@@ -377,7 +377,6 @@ class TDigest {
   void mergeProcessed(const std::vector<const TDigest*>& tdigests) {
     if (tdigests.size() == 0) return;
 
-    size_t total = processed_.size();
     CentroidListQueue pq(CentroidListComparator{});
     for (auto& td : tdigests) {
       auto& sorted = td->processed_;
@@ -388,8 +387,11 @@ class TDigest {
         processedWeight_ += td->processedWeight_;
       }
     }
+    if( total == 0 ) return;
+
     if( processed_.size() > 0 ) {
        pq.push(CentroidList(processed_));
+       total += processed_.size();
     }
 
     std::vector<Centroid> sorted;
