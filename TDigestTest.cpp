@@ -102,7 +102,7 @@ TEST_F(TDigestTest, FewValues) {
   std::uniform_int_distribution<> bools(0, 1);
   std::uniform_real_distribution<> qvalue(0.0, 1.0);
 
-  const auto length = dist(gen);
+  const auto length = 10;//dist(gen);
 
   std::vector<double> values;
   values.reserve(length);

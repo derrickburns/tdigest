@@ -54,6 +54,12 @@ class CentroidListComparator {
   }
 };
 
+template <class Iter, class T>
+Iter binary_find(Iter begin, Iter end, T val) {
+  Iter i = std::lower_bound(begin, end, val);
+  return (i != end && !(val < *i)) ? i : end;
+}
+
 using CentroidListQueue = std::priority_queue<CentroidList, std::vector<CentroidList>, CentroidListComparator>;
 
 struct CentroidComparator {
@@ -176,7 +182,6 @@ class TDigest {
           return 0;
         }
       }
-      CHECK_GT(x, mean(0));
 
       // and the right tail
       if (x >= mean(n - 1)) {
@@ -186,34 +191,21 @@ class TDigest {
           return 1;
         }
       }
-      CHECK_LT(x, mean(n - 1));
 
-      // we know that there are at least two sorted and x > mean(0) && x < mean(n-1)
-      // that means that there are either a bunch of consecutive sorted all equal at x
-      // or there are consecutive sorted, c0 <= x and c1 > x
-      auto weightSoFar = weight(0) / 2.0;
-      for (size_t it = 0; it < n; it++) {
-        if (mean(it) == x) {
-          auto w0 = weightSoFar;
-          while (it < n && mean(it + 1) == x) {
-            weightSoFar += (weight(it) + weight(it + 1));
-            it++;
-          }
-          return (w0 + weightSoFar) / 2 / processedWeight_;
-        }
-        if (mean(it) <= x && mean(it + 1) > x) {
-          if (mean(it + 1) - mean(it) > 0.0) {
-            auto dw = (weight(it) + weight(it + 1)) / 2.0;
-            return (weightSoFar + dw * (x - mean(it)) / (mean(it + 1) - mean(it))) / processedWeight_;
-          } else {
-            // this is simply caution against floating point madness
-            // it is conceivable that the sorted will be different
-            // but too near to allow safe interpolation
-            auto dw = (weight(it) + weight(it + 1)) / 2.0;
-            return weightSoFar + dw / processedWeight_;
-          }
-        }
-        weightSoFar += (weight(it) + weight(it + 1)) / 2.0;
+      CentroidComparator cc;
+      auto iter = std::lower_bound(processed_.cbegin(), processed_.cend(), Centroid(x,0), cc);
+      auto end = processed_.cend();
+      while ((iter+1) != end && (iter)->mean() == x) {
+        ++iter;
+      }
+
+      if (iter + 1 != processed_.cend()) {
+        auto i = std::distance(processed_.cbegin(), iter);
+        auto z1 = x - (iter-1)->mean();
+        auto z2 = (iter)->mean() - x;
+        CHECK_LE(0.0, z1);
+        CHECK_LE(z1, 1.0);
+        return weightedAverage(cumulative_[i-1], z2, cumulative_[i], z1) / processedWeight_;
       }
       return NAN;
     }
@@ -255,11 +247,13 @@ class TDigest {
     }
 
     auto iter = std::lower_bound(cumulative_.cbegin(), cumulative_.cend(), index);
-    if (iter+1 != cumulative_.cend()) {
+
+    if (iter + 1 != cumulative_.cend()) {
       auto i = std::distance(cumulative_.cbegin(), iter);
-      auto z1 = index - *(iter);
-      auto z2 = *(iter+1) - index;
-      return weightedAverage(mean(i), z2, mean(i+1), z1);
+      auto z1 = index - *(iter-1);
+      auto z2 = *(iter) - index;
+      //LOG(INFO) << "z2 " << z2 << " index " << index << " z1 " << z1;
+      return weightedAverage(mean(i-1), z2, mean(i), z1);
     }
 
     CHECK_LE(index, processedWeight_);
@@ -267,7 +261,7 @@ class TDigest {
 
     auto z1 = index - processedWeight_ - weight(n - 1) / 2.0;
     auto z2 = weight(n - 1) / 2 - z1;
-    return weightedAverage(max, z2, mean(n - 1), z1);
+    return weightedAverage(mean(n - 1), z1, max, z2);
   }
 
   Value compression() const { return compression_; }
@@ -420,7 +414,7 @@ class TDigest {
     min = std::min(min, processed_[0].mean());
     max = std::max(max, (processed_.cend() - 1)->mean());
 
-   updateCumulative();
+    updateCumulative();
   }
 
   inline int checkWeights() { return checkWeights(processed_, processedWeight_); }
