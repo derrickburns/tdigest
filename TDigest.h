@@ -33,6 +33,8 @@ using Value = double;
 using Weight = double;
 using Index = size_t;
 
+const size_t kHighWater = 40000;
+
 class Centroid {
  public:
   Centroid() : Centroid(0.0, 0.0) {}
@@ -71,12 +73,6 @@ class CentroidListComparator {
   }
 };
 
-template <class Iter, class T>
-Iter binary_find(Iter begin, Iter end, T val) {
-  Iter i = std::lower_bound(begin, end, val);
-  return (i != end && !(val < *i)) ? i : end;
-}
-
 using CentroidListQueue = std::priority_queue<CentroidList, std::vector<CentroidList>, CentroidListComparator>;
 
 struct CentroidComparator {
@@ -84,6 +80,15 @@ struct CentroidComparator {
 };
 
 class TDigest {
+  class TDigestComparator {
+   public:
+    TDigestComparator() {}
+
+    bool operator()(const TDigest* left, const TDigest* right) const { return left->totalSize() > right->totalSize(); }
+  };
+
+  using TDigestQueue = std::priority_queue<const TDigest*, std::vector<const TDigest*>, TDigestComparator>;
+
  public:
   TDigest() : TDigest(1000) {}
 
@@ -141,14 +146,36 @@ class TDigest {
 
   Index maxProcessed() const { return maxProcessed_; }
 
+  // merge in a vector of tdigests in the most efficient manner possible
+  // in constant space
+  // works for any value of kHighWater
   void add(const std::vector<const TDigest*>& others) {
     if (others.size() > 0) {
-      mergeProcessed(others);
-      mergeUnprocessed(others);
-      dirty_ = true;
-      processIfNecessary();
+      TDigestQueue pq(TDigestComparator{});
+      for (auto td : others) {
+        pq.push(td);
+      }
+      std::vector<const TDigest*> batch;
+      batch.reserve(others.size());
+
+      size_t totalSize = 0;
+      while (!pq.empty()) {
+        auto td = pq.top();
+        batch.push_back(td);
+        pq.pop();
+        totalSize += td->totalSize();
+        if (totalSize >= kHighWater || pq.empty()) {
+          mergeProcessed(batch);
+          mergeUnprocessed(batch);
+          processIfNecessary();
+          batch.clear();
+          totalSize = 0;
+        }
+      }
     }
   }
+
+  size_t totalSize() const { return processed_.size() + unprocessed_.size(); }
 
   long totalWeight() const { return static_cast<long>(processedWeight_ + unprocessedWeight_); }
 
@@ -210,19 +237,19 @@ class TDigest {
       }
 
       CentroidComparator cc;
-      auto iter = std::lower_bound(processed_.cbegin(), processed_.cend(), Centroid(x,0), cc);
+      auto iter = std::lower_bound(processed_.cbegin(), processed_.cend(), Centroid(x, 0), cc);
       auto end = processed_.cend();
-      while ((iter+1) != end && (iter)->mean() == x) {
+      while ((iter + 1) != end && (iter)->mean() == x) {
         ++iter;
       }
 
       if (iter + 1 != processed_.cend()) {
         auto i = std::distance(processed_.cbegin(), iter);
-        auto z1 = x - (iter-1)->mean();
+        auto z1 = x - (iter - 1)->mean();
         auto z2 = (iter)->mean() - x;
         CHECK_LE(0.0, z1);
         CHECK_LE(z1, 1.0);
-        return weightedAverage(cumulative_[i-1], z2, cumulative_[i], z1) / processedWeight_;
+        return weightedAverage(cumulative_[i - 1], z2, cumulative_[i], z1) / processedWeight_;
       }
       return NAN;
     }
@@ -267,10 +294,10 @@ class TDigest {
 
     if (iter + 1 != cumulative_.cend()) {
       auto i = std::distance(cumulative_.cbegin(), iter);
-      auto z1 = index - *(iter-1);
-      auto z2 = *(iter) - index;
-      //LOG(INFO) << "z2 " << z2 << " index " << index << " z1 " << z1;
-      return weightedAverage(mean(i-1), z2, mean(i), z1);
+      auto z1 = index - *(iter - 1);
+      auto z2 = *(iter)-index;
+      // LOG(INFO) << "z2 " << z2 << " index " << index << " z1 " << z1;
+      return weightedAverage(mean(i - 1), z2, mean(i), z1);
     }
 
     CHECK_LE(index, processedWeight_);
@@ -343,6 +370,7 @@ class TDigest {
       unprocessed_.insert(unprocessed_.end(), td->unprocessed_.cbegin(), td->unprocessed_.cend());
       unprocessedWeight_ += td->unprocessedWeight_;
     }
+    dirty_ = true;
   }
 
   // merge all processed centroids together into a single sorted vector
@@ -360,17 +388,21 @@ class TDigest {
         processedWeight_ += td->processedWeight_;
       }
     }
-    pq.push(CentroidList(processed_));
+    if( processed_.size() > 0 ) {
+       pq.push(CentroidList(processed_));
+    }
 
     std::vector<Centroid> sorted;
+    LOG(INFO) << "total " << total;
     sorted.reserve(total);
 
     while (!pq.empty()) {
       auto best = pq.top();
       pq.pop();
-      sorted.push_back(*best.iter);
+      sorted.push_back(*(best.iter));
       if (best.advance()) pq.push(best);
     }
+    dirty_ = true;
     processed_ = std::move(sorted);
   }
 
