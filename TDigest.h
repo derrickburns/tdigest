@@ -18,12 +18,11 @@ using Index = size_t;
 
 class Centroid {
  public:
+  Centroid() : Centroid(0.0, 0.0) {}
 
-  Centroid() : Centroid(0.0,0.0) {}
-  
   Centroid(Value mean, Weight weight) : mean_(mean), weight_(weight) {}
 
-  inline Weight mean() const noexcept { return mean_; }
+  inline Value mean() const noexcept { return mean_; }
 
   inline Weight weight() const noexcept { return weight_; }
 
@@ -119,7 +118,7 @@ class TDigest {
 
   Index maxProcessed() const { return maxProcessed_; }
 
-  void add(const std::vector<const TDigest *>& others) {
+  void add(const std::vector<const TDigest*>& others) {
     if (others.size() > 0) {
       mergeProcessed(others);
       mergeUnprocessed(others);
@@ -255,24 +254,20 @@ class TDigest {
       return min + 2.0 * index / weight(0) * (mean(0) - min);
     }
 
-    // in between we interpolate between sorted
-    auto weightSoFar = weight(0) / 2.0;
-    for (Weight i = 0; i < n - 1; i++) {
-      auto dw = (weight(i) + weight(i + 1)) / 2.0;
-      if (weightSoFar + dw > index) {
-        // sorted i and i+1 bracket our current point
-        auto z1 = index - weightSoFar;
-        auto z2 = weightSoFar + dw - index;
-        return weightedAverage(mean(i), z2, mean(i + 1), z1);
-      }
-      weightSoFar += dw;
+    auto iter = std::lower_bound(cumulative_.cbegin(), cumulative_.cend(), index);
+    if (iter+1 != cumulative_.cend()) {
+      auto i = std::distance(cumulative_.cbegin(), iter);
+      auto z1 = index - *(iter);
+      auto z2 = *(iter+1) - index;
+      return weightedAverage(mean(i), z2, mean(i+1), z1);
     }
+
     CHECK_LE(index, processedWeight_);
     CHECK_GE(index, processedWeight_ - weight(n - 1) / 2.0);
 
     auto z1 = index - processedWeight_ - weight(n - 1) / 2.0;
     auto z2 = weight(n - 1) / 2 - z1;
-    return weightedAverage(mean(n - 1), z1, max, z2);
+    return weightedAverage(max, z2, mean(n - 1), z1);
   }
 
   Value compression() const { return compression_; }
@@ -313,6 +308,8 @@ class TDigest {
 
   std::vector<Centroid> unprocessed_;
 
+  std::vector<Weight> cumulative_;
+
   bool dirty_ = false;
 
   // return mean of i-th centroid
@@ -322,7 +319,7 @@ class TDigest {
   inline Weight weight(int i) const noexcept { return processed_[i].weight(); }
 
   // append all unprocessed centroids into current unprocessed vector
-  void mergeUnprocessed(const std::vector<const TDigest *>& tdigests) {
+  void mergeUnprocessed(const std::vector<const TDigest*>& tdigests) {
     if (tdigests.size() == 0) return;
 
     size_t total = unprocessed_.size();
@@ -338,7 +335,7 @@ class TDigest {
   }
 
   // merge all processed centroids together into a single sorted vector
-  void mergeProcessed(const std::vector<const TDigest *>& tdigests) {
+  void mergeProcessed(const std::vector<const TDigest*>& tdigests) {
     if (tdigests.size() == 0) return;
 
     size_t total = processed_.size();
@@ -370,6 +367,20 @@ class TDigest {
     if (unprocessed_.size() > maxUnprocessed_ || processed_.size() > maxProcessed_) {
       process();
     }
+  }
+
+  void updateCumulative() {
+    const auto n = processed_.size();
+    cumulative_.clear();
+    cumulative_.reserve(n + 1);
+    auto previous = 0.0;
+    for (Index i = 0; i < n; i++) {
+      auto current = weight(i);
+      auto halfCurrent = current / 2.0;
+      cumulative_.push_back(previous + halfCurrent);
+      previous = previous + current;
+    }
+    cumulative_.push_back(previous);
   }
 
   // merges unprocessed_ centroids and processed_ centroids together and processes them
@@ -408,12 +419,14 @@ class TDigest {
     unprocessed_.clear();
     min = std::min(min, processed_[0].mean());
     max = std::max(max, (processed_.cend() - 1)->mean());
+
+   updateCumulative();
   }
 
   inline int checkWeights() { return checkWeights(processed_, processedWeight_); }
 
-  int checkWeights(const std::vector<Centroid>& sorted, Value total) {
-    Weight badWeight = 0;
+  size_t checkWeights(const std::vector<Centroid>& sorted, Value total) {
+    size_t badWeight = 0;
     auto k1 = 0.0;
     auto q = 0.0;
     for (auto iter = sorted.cbegin(); iter != sorted.cend(); iter++) {
