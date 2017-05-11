@@ -109,16 +109,15 @@ class TDigest {
       : TDigest(compression, unmergedSize, mergedSize) {
     processed_ = std::move(processed);
     unprocessed_ = std::move(unprocessed);
- 
-    processedWeight_ = weight(processed_); 
+
+    processedWeight_ = weight(processed_);
     unprocessedWeight_ = weight(unprocessed_);
     updateCumulative();
   }
 
-
   static Weight weight(std::vector<Centroid>& centroids) noexcept {
     Weight w = 0.0;
-    for( auto centroid: centroids ) {
+    for (auto centroid : centroids) {
       w += centroid.weight();
     }
     return w;
@@ -151,7 +150,7 @@ class TDigest {
   // merge in another t-digest
   inline void merge(const TDigest* other) {
     std::vector<const TDigest*> others{other};
-    add(others);
+    add(others.cbegin(), others.cend());
   }
 
   const std::vector<Centroid>& processed() const { return processed_; }
@@ -162,17 +161,20 @@ class TDigest {
 
   Index maxProcessed() const { return maxProcessed_; }
 
+  inline void add(std::vector<const TDigest*> digests) { add(digests.cbegin(), digests.cend()); }
+
   // merge in a vector of tdigests in the most efficient manner possible
   // in constant space
   // works for any value of kHighWater
-  void add(const std::vector<const TDigest*>& others) {
-    if (others.size() > 0) {
+  void add(std::vector<const TDigest*>::const_iterator iter, std::vector<const TDigest*>::const_iterator end) {
+    if (iter != end) {
+      auto size = std::distance(iter, end);
       TDigestQueue pq(TDigestComparator{});
-      for (auto td : others) {
-        pq.push(td);
+      for (; iter != end; iter++) {
+        pq.push((*iter));
       }
       std::vector<const TDigest*> batch;
-      batch.reserve(others.size());
+      batch.reserve(size);
 
       size_t totalSize = 0;
       while (!pq.empty()) {
@@ -203,13 +205,11 @@ class TDigest {
 
   // return the cdf on the t-digest
   Value cdf(Value x) {
-    if(haveUnprocessed() || isDirty()) process();
+    if (haveUnprocessed() || isDirty()) process();
     return cdfProcessed(x);
   }
 
-  bool isDirty() {
-    return processed_.size() > maxProcessed_ || unprocessed_.size() > maxUnprocessed_;
-  }
+  bool isDirty() { return processed_.size() > maxProcessed_ || unprocessed_.size() > maxUnprocessed_; }
 
   // return the cdf on the processed values
   Value cdfProcessed(Value x) const {
@@ -277,7 +277,7 @@ class TDigest {
 
   // this returns a quantile on the t-digest
   Value quantile(Value q) {
-    if(haveUnprocessed() || isDirty()) process();
+    if (haveUnprocessed() || isDirty()) process();
     return quantileProcessed(q);
   }
 
@@ -346,6 +346,18 @@ class TDigest {
     return true;
   }
 
+  inline void add(std::vector<Centroid>::const_iterator iter, std::vector<Centroid>::const_iterator end) {
+    while (iter != end) {
+      const size_t diff = std::distance(iter, end);
+      const size_t room = maxUnprocessed_ - unprocessed_.size();
+      auto mid = iter + std::min(diff, room);
+      while (iter != mid) unprocessed_.push_back(*(iter++));
+      if (unprocessed_.size() >= maxUnprocessed_) {
+        process();
+      }
+    }
+  }
+
  private:
   Value compression_;
 
@@ -404,11 +416,11 @@ class TDigest {
         processedWeight_ += td->processedWeight_;
       }
     }
-    if( total == 0 ) return;
+    if (total == 0) return;
 
-    if( processed_.size() > 0 ) {
-       pq.push(CentroidList(processed_));
-       total += processed_.size();
+    if (processed_.size() > 0) {
+      pq.push(CentroidList(processed_));
+      total += processed_.size();
     }
 
     std::vector<Centroid> sorted;
