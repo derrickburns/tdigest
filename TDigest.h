@@ -213,10 +213,16 @@ class TDigest {
 
   // return the cdf on the processed values
   Value cdfProcessed(Value x) const {
+    DLOG(INFO) << "cdf value " << x;
+    DLOG(INFO) << "processed size " << processed_.size();
     if (processed_.size() == 0) {
       // no data to examine
+      DLOG(INFO) << "no processed values";
+
       return 0.0;
     } else if (processed_.size() == 1) {
+      DLOG(INFO) << "one processed value "
+                 << " min " << min << " max " << max;
       // exactly one centroid, should have max==min
       auto width = max - min;
       if (x < min) {
@@ -233,15 +239,22 @@ class TDigest {
     } else {
       auto n = processed_.size();
       if (x <= min) {
+        DLOG(INFO) << "below min "
+                   << " min " << min << " x " << x;
         return 0;
       }
 
       if (x >= max) {
+        DLOG(INFO) << "above max "
+                   << " max " << max << " x " << x;
         return 1;
       }
 
       // check for the left tail
       if (x <= mean(0)) {
+        DLOG(INFO) << "left tail "
+                   << " min " << min << " mean(0) " << mean(0) << " x " << x;
+
         // note that this is different than mean(0) > min ... this guarantees interpolation works
         if (mean(0) - min > 0) {
           return (x - min) / (mean(0) - min) * weight(0) / processedWeight_ / 2.0;
@@ -252,6 +265,9 @@ class TDigest {
 
       // and the right tail
       if (x >= mean(n - 1)) {
+        DLOG(INFO) << "right tail"
+                   << " max " << max << " mean(n - 1) " << mean(n - 1) << " x " << x;
+
         if (max - mean(n - 1) > 0) {
           return 1.0 - (max - x) / (max - mean(n - 1)) * weight(n - 1) / processedWeight_ / 2.0;
         } else {
@@ -260,17 +276,16 @@ class TDigest {
       }
 
       CentroidComparator cc;
-      auto iter = std::lower_bound(processed_.cbegin(), processed_.cend(), Centroid(x, 0), cc);
-      auto end = processed_.cend();
-      while ((iter + 1) != end && (iter)->mean() == x) {
-        ++iter;
-      }
+      auto iter = std::upper_bound(processed_.cbegin(), processed_.cend(), Centroid(x, 0), cc);
 
       auto i = std::distance(processed_.cbegin(), iter);
       auto z1 = x - (iter - 1)->mean();
       auto z2 = (iter)->mean() - x;
       CHECK_LE(0.0, z1);
       CHECK_LE(z1, 1.0);
+      DLOG(INFO) << "middle "
+                 << " z1 " << z1 << " z2 " << z2 << " x " << x;
+
       return weightedAverage(cumulative_[i - 1], z2, cumulative_[i], z1) / processedWeight_;
     }
   }
