@@ -98,10 +98,10 @@ class TDigest {
 
   TDigest(Value compression, Index unmergedSize, Index mergedSize)
       : compression_(compression),
-        maxProcessed(processedSize(mergedSize, compression)),
-        maxUnprocessed(unprocessedSize(unmergedSize, compression)) {
-    processed_.reserve(maxProcessed);
-    unprocessed_.reserve(maxUnprocessed + 1);
+        maxProcessed_(processedSize(mergedSize, compression)),
+        maxUnprocessed_(unprocessedSize(unmergedSize, compression)) {
+    processed_.reserve(maxProcessed_);
+    unprocessed_.reserve(maxUnprocessed_ + 1);
   }
 
   TDigest(std::vector<Centroid>&& processed, std::vector<Centroid>&& unprocessed, Value compression,
@@ -125,8 +125,8 @@ class TDigest {
 
   TDigest& operator=(TDigest&& o) {
     compression_ = o.compression_;
-    maxProcessed = o.maxProcessed;
-    maxUnprocessed = o.maxUnprocessed;
+    maxProcessed_ = o.maxProcessed_;
+    maxUnprocessed_ = o.maxUnprocessed_;
     processedWeight_ = o.processedWeight_;
     unprocessedWeight_ = o.unprocessedWeight_;
     processed_ = std::move(o.processed_);
@@ -136,8 +136,8 @@ class TDigest {
   }
 
   TDigest(TDigest&& o)
-      : TDigest(std::move(o.processed_), std::move(o.unprocessed_), o.compression_, o.maxUnprocessed,
-                o.maxProcessed) {}
+      : TDigest(std::move(o.processed_), std::move(o.unprocessed_), o.compression_, o.maxUnprocessed_,
+                o.maxProcessed_) {}
 
   static inline Index processedSize(Index size, Value compression) noexcept {
     return (size == 0) ? static_cast<Index>(2 * std::ceil(compression)) : size;
@@ -157,9 +157,9 @@ class TDigest {
 
   const std::vector<Centroid>& unprocessed() const { return unprocessed_; }
 
-  Index max_Unprocessed() const { return maxUnprocessed; }
+  Index maxUnprocessed() const { return maxUnprocessed_; }
 
-  Index max_Processed() const { return maxProcessed; }
+  Index maxProcessed() const { return maxProcessed_; }
 
   inline void add(std::vector<const TDigest*> digests) { add(digests.cbegin(), digests.cend()); }
 
@@ -209,7 +209,7 @@ class TDigest {
     return cdfProcessed(x);
   }
 
-  bool isDirty() { return processed_.size() > maxProcessed || unprocessed_.size() > maxUnprocessed; }
+  bool isDirty() { return processed_.size() > maxProcessed_ || unprocessed_.size() > maxUnprocessed_; }
 
   // return the cdf on the processed values
   Value cdfProcessed(Value x) const {
@@ -364,10 +364,10 @@ class TDigest {
   inline void add(std::vector<Centroid>::const_iterator iter, std::vector<Centroid>::const_iterator end) {
     while (iter != end) {
       const size_t diff = std::distance(iter, end);
-      const size_t room = maxUnprocessed - unprocessed_.size();
+      const size_t room = maxUnprocessed_ - unprocessed_.size();
       auto mid = iter + std::min(diff, room);
       while (iter != mid) unprocessed_.push_back(*(iter++));
-      if (unprocessed_.size() >= maxUnprocessed) {
+      if (unprocessed_.size() >= maxUnprocessed_) {
         process();
       }
     }
@@ -380,9 +380,9 @@ class TDigest {
 
   Value max_ = std::numeric_limits<Value>::min();
 
-  Index maxProcessed;
+  Index maxProcessed_;
 
-  Index maxUnprocessed;
+  Index maxUnprocessed_;
 
   Value processedWeight_ = 0.0;
 
@@ -449,6 +449,8 @@ class TDigest {
       if (best.advance()) pq.push(best);
     }
     processed_ = std::move(sorted);
+    min_ = std::min(min_, processed_[0].mean());
+    max_ = std::max(max_, (processed_.cend() - 1)->mean());
   }
 
   inline void processIfNecessary() {
@@ -472,7 +474,7 @@ class TDigest {
   }
 
   // merges unprocessed_ centroids and processed_ centroids together and processes them
-  // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed centroids
+  // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed_ centroids
   inline void process() {
     CentroidComparator cc;
     std::sort(unprocessed_.begin(), unprocessed_.end(), cc);
