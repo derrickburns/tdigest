@@ -288,7 +288,7 @@ class TDigest {
       auto z1 = x - (iter - 1)->mean();
       auto z2 = (iter)->mean() - x;
       CHECK_LE(0.0, z1);
-      CHECK_LE(z1, 1.0);
+      CHECK_LE(0.0, z2);
       DLOG(INFO) << "middle "
                  << " z1 " << z1 << " z2 " << z2 << " x " << x;
 
