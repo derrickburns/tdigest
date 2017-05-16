@@ -112,6 +112,10 @@ class TDigest {
 
     processedWeight_ = weight(processed_);
     unprocessedWeight_ = weight(unprocessed_);
+    if( processed_.size() > 0 ) {
+      min_ = std::min(min_, processed_[0].mean());
+      max_ = std::max(max_, (processed_.cend() - 1)->mean());
+    }
     updateCumulative();
   }
 
@@ -132,6 +136,8 @@ class TDigest {
     processed_ = std::move(o.processed_);
     unprocessed_ = std::move(o.unprocessed_);
     cumulative_ = std::move(o.cumulative_);
+    min_ = o.min_;
+    max_ = o.max_;
     return *this;
   }
 
@@ -449,8 +455,10 @@ class TDigest {
       if (best.advance()) pq.push(best);
     }
     processed_ = std::move(sorted);
-    min_ = std::min(min_, processed_[0].mean());
-    max_ = std::max(max_, (processed_.cend() - 1)->mean());
+    if( processed_.size() > 0 ) {
+      min_ = std::min(min_, processed_[0].mean());
+      max_ = std::max(max_, (processed_.cend() - 1)->mean());
+    }
   }
 
   inline void processIfNecessary() {
