@@ -98,10 +98,10 @@ class TDigest {
 
   TDigest(Value compression, Index unmergedSize, Index mergedSize)
       : compression_(compression),
-        maxProcessed_(processedSize(mergedSize, compression)),
-        maxUnprocessed_(unprocessedSize(unmergedSize, compression)) {
-    processed_.reserve(maxProcessed_);
-    unprocessed_.reserve(maxUnprocessed_ + 1);
+        maxProcessed(processedSize(mergedSize, compression)),
+        maxUnprocessed(unprocessedSize(unmergedSize, compression)) {
+    processed_.reserve(maxProcessed);
+    unprocessed_.reserve(maxUnprocessed + 1);
   }
 
   TDigest(std::vector<Centroid>&& processed, std::vector<Centroid>&& unprocessed, Value compression,
@@ -125,8 +125,8 @@ class TDigest {
 
   TDigest& operator=(TDigest&& o) {
     compression_ = o.compression_;
-    maxProcessed_ = o.maxProcessed_;
-    maxUnprocessed_ = o.maxUnprocessed_;
+    maxProcessed = o.maxProcessed;
+    maxUnprocessed = o.maxUnprocessed;
     processedWeight_ = o.processedWeight_;
     unprocessedWeight_ = o.unprocessedWeight_;
     processed_ = std::move(o.processed_);
@@ -136,8 +136,8 @@ class TDigest {
   }
 
   TDigest(TDigest&& o)
-      : TDigest(std::move(o.processed_), std::move(o.unprocessed_), o.compression_, o.maxUnprocessed_,
-                o.maxProcessed_) {}
+      : TDigest(std::move(o.processed_), std::move(o.unprocessed_), o.compression_, o.maxUnprocessed,
+                o.maxProcessed) {}
 
   static inline Index processedSize(Index size, Value compression) noexcept {
     return (size == 0) ? static_cast<Index>(2 * std::ceil(compression)) : size;
@@ -157,9 +157,9 @@ class TDigest {
 
   const std::vector<Centroid>& unprocessed() const { return unprocessed_; }
 
-  Index maxUnprocessed() const { return maxUnprocessed_; }
+  Index max_Unprocessed() const { return maxUnprocessed; }
 
-  Index maxProcessed() const { return maxProcessed_; }
+  Index max_Processed() const { return maxProcessed; }
 
   inline void add(std::vector<const TDigest*> digests) { add(digests.cbegin(), digests.cend()); }
 
@@ -209,55 +209,55 @@ class TDigest {
     return cdfProcessed(x);
   }
 
-  bool isDirty() { return processed_.size() > maxProcessed_ || unprocessed_.size() > maxUnprocessed_; }
+  bool isDirty() { return processed_.size() > maxProcessed || unprocessed_.size() > maxUnprocessed; }
 
   // return the cdf on the processed values
   Value cdfProcessed(Value x) const {
     DLOG(INFO) << "cdf value " << x;
     DLOG(INFO) << "processed size " << processed_.size();
     if (processed_.size() == 0) {
-      // no data to examine
+      // no data to examin_e
       DLOG(INFO) << "no processed values";
 
       return 0.0;
     } else if (processed_.size() == 1) {
       DLOG(INFO) << "one processed value "
-                 << " min " << min << " max " << max;
-      // exactly one centroid, should have max==min
-      auto width = max - min;
-      if (x < min) {
+                 << " min_ " << min_ << " max_ " << max_;
+      // exactly one centroid, should have max_==min_
+      auto width = max_ - min_;
+      if (x < min_) {
         return 0.0;
-      } else if (x > max) {
+      } else if (x > max_) {
         return 1.0;
-      } else if (x - min <= width) {
-        // min and max are too close together to do any viable interpolation
+      } else if (x - min_ <= width) {
+        // min_ and max_ are too close together to do any viable interpolation
         return 0.5;
       } else {
-        // interpolate if somehow we have weight > 0 and max != min
-        return (x - min) / (max - min);
+        // interpolate if somehow we have weight > 0 and max_ != min_
+        return (x - min_) / (max_ - min_);
       }
     } else {
       auto n = processed_.size();
-      if (x <= min) {
-        DLOG(INFO) << "below min "
-                   << " min " << min << " x " << x;
+      if (x <= min_) {
+        DLOG(INFO) << "below min_ "
+                   << " min_ " << min_ << " x " << x;
         return 0;
       }
 
-      if (x >= max) {
-        DLOG(INFO) << "above max "
-                   << " max " << max << " x " << x;
+      if (x >= max_) {
+        DLOG(INFO) << "above max_ "
+                   << " max_ " << max_ << " x " << x;
         return 1;
       }
 
       // check for the left tail
       if (x <= mean(0)) {
         DLOG(INFO) << "left tail "
-                   << " min " << min << " mean(0) " << mean(0) << " x " << x;
+                   << " min_ " << min_ << " mean(0) " << mean(0) << " x " << x;
 
-        // note that this is different than mean(0) > min ... this guarantees interpolation works
-        if (mean(0) - min > 0) {
-          return (x - min) / (mean(0) - min) * weight(0) / processedWeight_ / 2.0;
+        // note that this is different than mean(0) > min_ ... this guarantees interpolation works
+        if (mean(0) - min_ > 0) {
+          return (x - min_) / (mean(0) - min_) * weight(0) / processedWeight_ / 2.0;
         } else {
           return 0;
         }
@@ -266,10 +266,10 @@ class TDigest {
       // and the right tail
       if (x >= mean(n - 1)) {
         DLOG(INFO) << "right tail"
-                   << " max " << max << " mean(n - 1) " << mean(n - 1) << " x " << x;
+                   << " max_ " << max_ << " mean(n - 1) " << mean(n - 1) << " x " << x;
 
-        if (max - mean(n - 1) > 0) {
-          return 1.0 - (max - x) / (max - mean(n - 1)) * weight(n - 1) / processedWeight_ / 2.0;
+        if (max_ - mean(n - 1) > 0) {
+          return 1.0 - (max_ - x) / (max_ - mean(n - 1)) * weight(n - 1) / processedWeight_ / 2.0;
         } else {
           return 1;
         }
@@ -319,10 +319,10 @@ class TDigest {
     // if values were stored in a sorted array, index would be the offset we are Weighterested in
     const auto index = q * processedWeight_;
 
-    // at the boundaries, we return min or max
+    // at the boundaries, we return min_ or max_
     if (index < weight(0) / 2.0) {
       CHECK_GT(weight(0), 0);
-      return min + 2.0 * index / weight(0) * (mean(0) - min);
+      return min_ + 2.0 * index / weight(0) * (mean(0) - min_);
     }
 
     auto iter = std::lower_bound(cumulative_.cbegin(), cumulative_.cend(), index);
@@ -340,7 +340,7 @@ class TDigest {
 
     auto z1 = index - processedWeight_ - weight(n - 1) / 2.0;
     auto z2 = weight(n - 1) / 2 - z1;
-    return weightedAverage(mean(n - 1), z1, max, z2);
+    return weightedAverage(mean(n - 1), z1, max_, z2);
   }
 
   Value compression() const { return compression_; }
@@ -364,10 +364,10 @@ class TDigest {
   inline void add(std::vector<Centroid>::const_iterator iter, std::vector<Centroid>::const_iterator end) {
     while (iter != end) {
       const size_t diff = std::distance(iter, end);
-      const size_t room = maxUnprocessed_ - unprocessed_.size();
+      const size_t room = maxUnprocessed - unprocessed_.size();
       auto mid = iter + std::min(diff, room);
       while (iter != mid) unprocessed_.push_back(*(iter++));
-      if (unprocessed_.size() >= maxUnprocessed_) {
+      if (unprocessed_.size() >= maxUnprocessed) {
         process();
       }
     }
@@ -376,13 +376,13 @@ class TDigest {
  private:
   Value compression_;
 
-  Value min = std::numeric_limits<Value>::max();
+  Value min_ = std::numeric_limits<Value>::max();
 
-  Value max = std::numeric_limits<Value>::min();
+  Value max_ = std::numeric_limits<Value>::min();
 
-  Index maxProcessed_;
+  Index maxProcessed;
 
-  Index maxUnprocessed_;
+  Index maxUnprocessed;
 
   Value processedWeight_ = 0.0;
 
@@ -472,7 +472,7 @@ class TDigest {
   }
 
   // merges unprocessed_ centroids and processed_ centroids together and processes them
-  // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed_ centroids
+  // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed centroids
   inline void process() {
     CentroidComparator cc;
     std::sort(unprocessed_.begin(), unprocessed_.end(), cc);
@@ -503,9 +503,10 @@ class TDigest {
       }
     }
     unprocessed_.clear();
-    min = std::min(min, processed_[0].mean());
-    max = std::max(max, (processed_.cend() - 1)->mean());
-
+    min_ = std::min(min_, processed_[0].mean());
+    DLOG(INFO) << "new min_ " << min_;
+    max_ = std::max(max_, (processed_.cend() - 1)->mean());
+    DLOG(INFO) << "new max_ " << max_;
     updateCumulative();
   }
 
@@ -537,7 +538,7 @@ class TDigest {
   }
 
   /**
-   * Converts a quantile into a centroid scale value.  The centroid scale is nominally
+   * Converts a quantile into a centroid scale value.  The centroid scale is nomin_ally
    * the number k of the centroid that a quantile point q should belong to.  Due to
    * round-offs, however, we can't align things perfectly without splitting points
    * and sorted.  We don't want to do that, so we have to allow for offsets.
