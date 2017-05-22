@@ -92,6 +92,20 @@ static double quantile(const double q, const std::vector<double>& values) {
   return q1;
 }
 
+TEST_F(TDigestTest, CrashAfterMerge) {
+ tdigest::TDigest digest(1000);
+ std::uniform_real_distribution<> reals(0.0, 1.0);
+ std::random_device gen;
+ for (int i = 0; i < 100000; i++) {
+   digest.add(reals(gen));
+ }
+ digest.compress();
+
+ tdigest::TDigest digest2(1000);
+ digest2.merge(&digest);
+ digest2.quantile(0.5);
+}
+
 TEST_F(TDigestTest, EmptyDigest) {
   tdigest::TDigest digest(100);
   EXPECT_EQ(0, digest.processed().size());
