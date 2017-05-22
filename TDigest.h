@@ -196,6 +196,7 @@ class TDigest {
           totalSize = 0;
         }
       }
+      updateCumulative();
     }
   }
 
