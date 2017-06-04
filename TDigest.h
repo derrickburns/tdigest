@@ -47,8 +47,13 @@ class Centroid {
 
   inline void add(const Centroid& c) {
     CHECK_GT(c.weight_, 0);
-    weight_ += c.weight_;
-    mean_ += c.weight_ * (c.mean_ - mean_) / weight_;
+    if( weight_ != 0.0 ) {
+      weight_ += c.weight_;
+      mean_ += c.weight_ * (c.mean_ - mean_) / weight_;
+    } else {
+      weight_ = c.weight_;
+      mean_ = c.mean_;
+    }
   }
 
  private:
@@ -220,9 +225,16 @@ class TDigest {
 
   // return the cdf on the processed values
   Value cdfProcessed(Value x) const {
+    DLOG(INFO) << "cdf value " << x;
+    DLOG(INFO) << "processed size " << processed_.size();
     if (processed_.size() == 0) {
+      // no data to examin_e
+      DLOG(INFO) << "no processed values";
+
       return 0.0;
     } else if (processed_.size() == 1) {
+      DLOG(INFO) << "one processed value "
+                 << " min_ " << min_ << " max_ " << max_;
       // exactly one centroid, should have max_==min_
       auto width = max_ - min_;
       if (x < min_) {
@@ -239,15 +251,22 @@ class TDigest {
     } else {
       auto n = processed_.size();
       if (x <= min_) {
+        DLOG(INFO) << "below min_ "
+                   << " min_ " << min_ << " x " << x;
         return 0;
       }
 
       if (x >= max_) {
+        DLOG(INFO) << "above max_ "
+                   << " max_ " << max_ << " x " << x;
         return 1;
       }
 
       // check for the left tail
       if (x <= mean(0)) {
+        DLOG(INFO) << "left tail "
+                   << " min_ " << min_ << " mean(0) " << mean(0) << " x " << x;
+
         // note that this is different than mean(0) > min_ ... this guarantees interpolation works
         if (mean(0) - min_ > 0) {
           return (x - min_) / (mean(0) - min_) * weight(0) / processedWeight_ / 2.0;
@@ -258,6 +277,9 @@ class TDigest {
 
       // and the right tail
       if (x >= mean(n - 1)) {
+        DLOG(INFO) << "right tail"
+                   << " max_ " << max_ << " mean(n - 1) " << mean(n - 1) << " x " << x;
+
         if (max_ - mean(n - 1) > 0) {
           return 1.0 - (max_ - x) / (max_ - mean(n - 1)) * weight(n - 1) / processedWeight_ / 2.0;
         } else {
@@ -273,6 +295,9 @@ class TDigest {
       auto z2 = (iter)->mean() - x;
       CHECK_LE(0.0, z1);
       CHECK_LE(0.0, z2);
+      DLOG(INFO) << "middle "
+                 << " z1 " << z1 << " z2 " << z2 << " x " << x;
+
       return weightedAverage(cumulative_[i - 1], z2, cumulative_[i], z1) / processedWeight_;
     }
   }
@@ -495,7 +520,9 @@ class TDigest {
     }
     unprocessed_.clear();
     min_ = std::min(min_, processed_[0].mean());
+    DLOG(INFO) << "new min_ " << min_;
     max_ = std::max(max_, (processed_.cend() - 1)->mean());
+    DLOG(INFO) << "new max_ " << max_;
     updateCumulative();
   }
 
