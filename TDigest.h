@@ -332,7 +332,7 @@ class TDigest {
     const auto index = q * processedWeight_;
 
     // at the boundaries, we return min_ or max_
-    if (index < weight(0) / 2.0) {
+    if (index <= weight(0) / 2.0) {
       CHECK_GT(weight(0), 0);
       return min_ + 2.0 * index / weight(0) * (mean(0) - min_);
     }
