@@ -228,7 +228,7 @@ class TDigest {
     DLOG(INFO) << "cdf value " << x;
     DLOG(INFO) << "processed size " << processed_.size();
     if (processed_.size() == 0) {
-      // no data to examin_e
+      // no data to examine
       DLOG(INFO) << "no processed values";
 
       return 0.0;
@@ -241,7 +241,7 @@ class TDigest {
         return 0.0;
       } else if (x > max_) {
         return 1.0;
-      } else if (x - min_ <= width) {
+      } else if (width <= 0) {
         // min_ and max_ are too close together to do any viable interpolation
         return 0.5;
       } else {
@@ -350,8 +350,8 @@ class TDigest {
     CHECK_LE(index, processedWeight_);
     CHECK_GE(index, processedWeight_ - weight(n - 1) / 2.0);
 
-    auto z1 = index - processedWeight_ - weight(n - 1) / 2.0;
-    auto z2 = weight(n - 1) / 2 - z1;
+    auto z1 = index - (processedWeight_ - weight(n - 1) / 2.0);
+    auto z2 = weight(n - 1) / 2.0 - z1;
     return weightedAverage(mean(n - 1), z1, max_, z2);
   }
 
@@ -622,6 +622,6 @@ class TDigest {
   }
 };
 
-}  // namespace tdigest2
+}  // namespace tdigest
 
 #endif  // TDIGEST2_TDIGEST_H_
