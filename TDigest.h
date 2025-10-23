@@ -490,6 +490,11 @@ class TDigest {
   // merges unprocessed_ centroids and processed_ centroids together and processes them
   // when complete, unprocessed_ will be empty and processed_ will have at most maxProcessed_ centroids
   inline void process() {
+    // Guard against processing when there's no data
+    if (unprocessed_.size() == 0 && processed_.size() == 0) {
+      return;
+    }
+
     CentroidComparator cc;
     std::sort(unprocessed_.begin(), unprocessed_.end(), cc);
     auto count = unprocessed_.size();
